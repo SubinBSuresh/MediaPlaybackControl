@@ -10,6 +10,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.widget.Button
+import android.widget.SeekBar
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -23,7 +24,11 @@ class MainActivity : AppCompatActivity(), MediaUtils.MediaUpdateListener {
     private lateinit var tvSource: TextView
     private lateinit var tvSessionInfo: TextView
     private lateinit var tvActions: TextView
+    private lateinit var btnPlayPause: Button
+    private lateinit var seekBar: SeekBar
     private lateinit var mediaUtils: MediaUtils
+
+    private var isUserSeeking = false
 
     private val handler = Handler(Looper.getMainLooper())
     private val updatePositionRunnable = object : Runnable {
@@ -52,10 +57,13 @@ class MainActivity : AppCompatActivity(), MediaUtils.MediaUpdateListener {
         tvSource = findViewById(R.id.tv_source)
         tvSessionInfo = findViewById(R.id.tv_session_info)
         tvActions = findViewById(R.id.tv_actions)
+        btnPlayPause = findViewById(R.id.btn_play_pause)
+        seekBar = findViewById(R.id.seekbar_progress)
         
         mediaUtils = MediaUtils.getInstance(this)
 
         setupButtons()
+        setupSeekBar()
 
         findViewById<Button>(R.id.btn_permission).setOnClickListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
@@ -100,14 +108,14 @@ class MainActivity : AppCompatActivity(), MediaUtils.MediaUpdateListener {
             val title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE) ?: "Unknown Title"
             val artist = metadata.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: "Unknown Artist"
             val album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM) ?: "Unknown Album"
-            tvMetadata.text = "Title: $title\nArtist: $artist\nAlbum: $album"
+            tvMetadata.text = "$title\n$artist\n$album"
         } else {
             tvMetadata.text = "Metadata: None"
         }
     }
 
     override fun onSessionDataUpdated(controller: MediaController?) {
-        tvSource.text = "Source: ${controller?.packageName ?: "None"}"
+        tvSource.text = "App: ${controller?.packageName ?: "None"}"
         controller?.let {
             val info = StringBuilder()
             info.append("Session Token: ${it.sessionToken}\n")
@@ -126,12 +134,24 @@ class MainActivity : AppCompatActivity(), MediaUtils.MediaUpdateListener {
 
     private fun updatePlaybackStatus(state: PlaybackState?, controller: MediaController?) {
         val statusText = when (state?.state) {
-            PlaybackState.STATE_PLAYING -> "Playing"
-            PlaybackState.STATE_PAUSED -> "Paused"
-            PlaybackState.STATE_STOPPED -> "Stopped"
-            PlaybackState.STATE_BUFFERING -> "Buffering"
+            PlaybackState.STATE_PLAYING -> {
+                btnPlayPause.text = "Pause"
+                "Playing"
+            }
+            PlaybackState.STATE_PAUSED -> {
+                btnPlayPause.text = "Play"
+                "Paused"
+            }
+            PlaybackState.STATE_STOPPED -> {
+                btnPlayPause.text = "Play"
+                "Stopped"
+            }
+            PlaybackState.STATE_BUFFERING -> "Buffering..."
             PlaybackState.STATE_ERROR -> "Error"
-            else -> "Unknown"
+            else -> {
+                btnPlayPause.text = "Play"
+                "Unknown"
+            }
         }
         
         val position = state?.position ?: 0L
@@ -139,8 +159,13 @@ class MainActivity : AppCompatActivity(), MediaUtils.MediaUpdateListener {
         val speed = state?.playbackSpeed ?: 1.0f
         
         val timeInfo = "${MediaUtils.formatTime(position)} / ${MediaUtils.formatTime(duration)}"
-        tvStatus.text = "Status: $statusText ($timeInfo) @ ${speed}x"
+        tvStatus.text = "$statusText ($timeInfo)"
         
+        if (!isUserSeeking && duration > 0) {
+            seekBar.max = duration.toInt()
+            seekBar.progress = position.toInt()
+        }
+
         val actions = state?.actions ?: 0L
         val actionList = mutableListOf<String>()
         if (actions and PlaybackState.ACTION_PLAY != 0L) actionList.add("PLAY")
@@ -148,11 +173,11 @@ class MainActivity : AppCompatActivity(), MediaUtils.MediaUpdateListener {
         if (actions and PlaybackState.ACTION_SKIP_TO_NEXT != 0L) actionList.add("NEXT")
         if (actions and PlaybackState.ACTION_SKIP_TO_PREVIOUS != 0L) actionList.add("PREV")
         if (actions and PlaybackState.ACTION_SEEK_TO != 0L) actionList.add("SEEK")
-        tvActions.text = "Supported Actions: ${actionList.joinToString(", ")}"
+        tvActions.text = "Supported: ${actionList.joinToString(", ")}"
     }
 
     private fun setupButtons() {
-        findViewById<Button>(R.id.btn_play_pause).setOnClickListener { mediaUtils.playPause() }
+        btnPlayPause.setOnClickListener { mediaUtils.playPause() }
         findViewById<Button>(R.id.btn_stop).setOnClickListener { mediaUtils.stop() }
         findViewById<Button>(R.id.btn_next).setOnClickListener { mediaUtils.next() }
         findViewById<Button>(R.id.btn_prev).setOnClickListener { mediaUtils.previous() }
@@ -161,5 +186,27 @@ class MainActivity : AppCompatActivity(), MediaUtils.MediaUpdateListener {
         findViewById<Button>(R.id.btn_vol_up).setOnClickListener { mediaUtils.volumeUp() }
         findViewById<Button>(R.id.btn_vol_down).setOnClickListener { mediaUtils.volumeDown() }
         findViewById<Button>(R.id.btn_mute).setOnClickListener { mediaUtils.toggleMute() }
+    }
+
+    private fun setupSeekBar() {
+        seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    val duration = mediaUtils.getActiveController()?.metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
+                    tvStatus.text = "Seeking: ${MediaUtils.formatTime(progress.toLong())} / ${MediaUtils.formatTime(duration)}"
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                isUserSeeking = true
+            }
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                isUserSeeking = false
+                seekBar?.let {
+                    mediaUtils.seekTo(it.progress.toLong())
+                }
+            }
+        })
     }
 }

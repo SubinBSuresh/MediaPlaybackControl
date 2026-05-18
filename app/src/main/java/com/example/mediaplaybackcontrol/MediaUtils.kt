@@ -121,6 +121,10 @@ class MediaUtils private constructor(context: Context) {
         activeController?.transportControls?.skipToPrevious()
     }
 
+    fun seekTo(position: Long) {
+        activeController?.transportControls?.seekTo(position)
+    }
+
     fun fastForward() {
         activeController?.let { controller ->
             val currentPos = controller.playbackState?.position ?: 0
